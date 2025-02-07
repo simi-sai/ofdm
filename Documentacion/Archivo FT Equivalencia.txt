@@ -1,0 +1,294 @@
+-- +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-- Archivo: FT_Equivalencia.txt
+--  * Equivalencias de regularidad y totales de tramites de equiv cerrados. Con resultado Aprobado. 
+--    Equivalencias INTERNAS y EXTERNAS (5-Externa Libre, 6-Pase, 7-Convenio)
+--  * Aprobaciones por Resolución
+--  * El año academico se calcula segun la fecha de la equivalencia del 01/04 al 31/03 del año siguiente.
+--
+-- En ambos casos tambien cuenta la actividad por las otras propuestas donde se encuentre el alumno
+-- y que la actividad sea parte del plan actual del alumno (equivalencias equivalentes).
+-- +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+WITH equiv_tra as (SELECT * FROM sga_equiv_tramite Where estado = 'C'),
+equiv_otorg as (SELECT *  FROM negocio.sga_equiv_otorgada  WHERE  sga_equiv_otorgada.resultado = 'A'  AND sga_equiv_otorgada.estado = 'A'  AND sga_equiv_otorgada.rectificado = 'N'),
+reconocimiento as (SELECT * FROM negocio.sga_reconocimiento  WHERE estado = 'C')
+SELECT 	
+    CASE WHEN greatest(equiv_otorg.fecha,'19000101'::date) >= to_date(cast(extract(year from greatest(equiv_otorg.fecha,'19000101'::date)) as text) || '0401','YYYYMMDD') 
+         THEN extract(year from greatest(equiv_otorg.fecha,'19000101'::date))::integer
+    	 ELSE extract(year from greatest(equiv_otorg.fecha,'19000101'::date))::integer - 1
+    END as anio_academico,
+    sga_alumnos.ubicacion,
+	to_char(greatest(equiv_otorg.fecha,'19000101'::date), 'DD/MM/YYYY')::VARCHAR(8) AS fecha_equivalencia,
+	sga_alumnos.alumno,
+	CASE
+	   WHEN mdp_personas.sexo = 'M' THEN 1
+	   WHEN mdp_personas.sexo = 'F' THEN 2
+	   WHEN mdp_personas.sexo = 'X' THEN 3 
+	END AS sexo,
+       (CASE WHEN mdp_personas.fecha_nacimiento IS NULL THEN NULL ELSE (
+		extract(year from age(date (extract(year from greatest(equiv_otorg.fecha,'19000101'::date)) ||'-12-31'), mdp_personas.fecha_nacimiento))
+	) END) as edad,
+	mdp_personas.nacionalidad,
+	(SELECT CASE WHEN mdp_datos_estudios.nivel_estudio = 3 THEN mdp_datos_estudios.colegio 
+		ELSE NULL END
+	FROM mdp_datos_estudios 
+	WHERE mdp_datos_estudios.persona = mdp_personas.persona
+	LIMIT 1) as colegio,
+	sga_alumnos.propuesta,
+	equiv_tra.plan_version as plan_version,
+	sga_elementos.elemento as actividad,
+	CASE equiv_otorg.instancia
+	  WHEN 10 THEN 'T' -- Equiv total
+	  WHEN 11 THEN 'R' -- Equiv de Regularidad
+	  WHEN 12 THEN 'P' -- Equiv Parcial
+	  WHEN 14 THEN 'RC' -- Equiv de Regularidad - Correlativas
+	END as alcance,
+	CASE
+	   WHEN equiv_otorg.resultado = 'A' THEN 'EA'
+	   WHEN equiv_otorg.resultado = 'R' THEN 'ER'
+	END as resultado,
+	equiv_otorg.nota::VARCHAR(10) as nota,
+	sga_escalas_notas_det.concepto as concepto,
+	equiv_tra.origen as origen,
+	equiv_otorg.equivalencia as equivalencia,
+	0 as actividad_comun,
+	equiv_tra.equivalencia_tramite as tramite,
+	equiv_tra.estado::VARCHAR(1) as estado_tramite,
+	90 as condicion_alumno,
+	1 as registros_examenes, 
+	ingreso.anio_academico_institucion as anio_ingreso_institucion,
+	ingreso.anio_academico_propuesta as anio_ingreso_propuesta,
+	ingreso.periodo_inscripcion_nombre::VARCHAR(100) as periodo_inscripcion_nombre,
+    sga_alumnos.persona
+   FROM	equiv_tra
+	LEFT JOIN sga_planes_versiones ON sga_planes_versiones.plan_version = equiv_tra.plan_version,
+	sga_equiv_tramite_origen,
+	equiv_otorg LEFT JOIN sga_escalas_notas_det ON (sga_escalas_notas_det.escala_nota = equiv_otorg.escala_nota AND sga_escalas_notas_det.nota = equiv_otorg.nota),
+	sga_alumnos,
+	mdp_personas,
+	_wichi_ingreso_alumnos as ingreso,
+	sga_elementos
+	
+WHERE sga_equiv_tramite_origen.origen = equiv_tra.origen
+  AND equiv_otorg.equivalencia_tramite = equiv_tra.equivalencia_tramite
+  AND sga_alumnos.alumno = equiv_tra.alumno 
+  AND sga_alumnos.persona = mdp_personas.persona
+  AND ingreso.alumno = sga_alumnos.alumno
+  AND sga_elementos.elemento = equiv_otorg.elemento
+
+  AND (${periodo} = 0 or greatest(equiv_otorg.fecha,'19000101'::date) BETWEEN to_date(${periodo}||'-04-01', 'YYYY-MM-DD') AND to_date((${periodo}+1)||'-03-31','YYYY-MM-DD'))
+
+UNION ALL 
+
+-- Equivalencias Equivalentes. Actividades que el alumno tiene en el plan actual de otras propuestas que esta cursando
+SELECT 	
+    CASE WHEN greatest(equiv_otorg.fecha,'19000101'::date) >= to_date(cast(extract(year from greatest(equiv_otorg.fecha,'19000101'::date)) as text) || '0401','YYYYMMDD') 
+         THEN extract(year from greatest(equiv_otorg.fecha,'19000101'::date))::integer
+    	 ELSE extract(year from greatest(equiv_otorg.fecha,'19000101'::date))::integer - 1
+    END as anio_academico,
+    sga_alumnos.ubicacion,
+	to_char(greatest(equiv_otorg.fecha,'19000101'::date), 'DD/MM/YYYY')::VARCHAR(8) AS fecha_equivalencia,
+	sga_alumnos2.alumno,
+	CASE
+	   WHEN mdp_personas.sexo = 'M' THEN 1
+	   WHEN mdp_personas.sexo = 'F' THEN 2
+	END AS sexo,
+       (CASE WHEN mdp_personas.fecha_nacimiento IS NULL THEN NULL ELSE (
+		extract(year from age(date (extract(year from greatest(equiv_otorg.fecha,'19000101'::date)) ||'-12-31'), mdp_personas.fecha_nacimiento))
+	) END) as edad,
+	mdp_personas.nacionalidad,
+	(SELECT CASE WHEN mdp_datos_estudios.nivel_estudio = 3 THEN mdp_datos_estudios.colegio 
+		ELSE NULL END
+	FROM mdp_datos_estudios 
+	WHERE mdp_datos_estudios.persona = mdp_personas.persona
+	LIMIT 1) as colegio,
+	sga_alumnos2.propuesta , 
+	sga_planes_versiones2.plan_version as plan_version, 
+	sga_elementos.elemento as actividad, 
+	CASE equiv_otorg.instancia
+	  WHEN 10 THEN 'T' -- Equiv total
+	  WHEN 11 THEN 'R' -- Equiv de Regularidad
+	  WHEN 12 THEN 'P' -- Equiv Parcial
+	  WHEN 14 THEN 'RC' -- Equiv de Regularidad - Correlativas
+	END as alcance,
+	CASE
+	   WHEN equiv_otorg.resultado = 'A' THEN 'EA'
+	   WHEN equiv_otorg.resultado = 'R' THEN 'ER'
+	END as resultado,
+	equiv_otorg.nota::VARCHAR(10) as nota,
+	sga_escalas_notas_det.concepto as concepto,
+	equiv_tra.origen as origen,
+	equiv_otorg.equivalencia as equivalencia,
+	1 as actividad_comun,
+	equiv_tra.equivalencia_tramite as tramite,
+	equiv_tra.estado::VARCHAR(1) as estado_tramite,
+	90 as condicion_alumno,
+	1 as registros_examenes, 
+	ingreso.anio_academico_institucion as anio_ingreso_institucion,
+	ingreso.anio_academico_propuesta as anio_ingreso_propuesta,
+	ingreso.periodo_inscripcion_nombre::VARCHAR(100) as periodo_inscripcion_nombre,
+    sga_alumnos.persona
+   FROM
+	equiv_tra,
+	sga_equiv_tramite_origen,
+	equiv_otorg LEFT JOIN sga_escalas_notas_det ON (sga_escalas_notas_det.escala_nota = equiv_otorg.escala_nota AND sga_escalas_notas_det.nota = equiv_otorg.nota),
+	sga_planes_versiones,
+	sga_alumnos,
+	mdp_personas,
+	_wichi_ingreso_alumnos as ingreso,
+	sga_elementos,
+	sga_alumnos as sga_alumnos2,
+	sga_planes_versiones as sga_planes_versiones2,
+	sga_elementos_plan as sga_elementos_plan2,
+	sga_elementos_revision as sga_elementos_revision2
+	
+WHERE sga_equiv_tramite_origen.origen = equiv_tra.origen
+  AND equiv_otorg.equivalencia_tramite = equiv_tra.equivalencia_tramite
+  AND sga_planes_versiones.plan_version = equiv_tra.plan_version
+  AND sga_alumnos.alumno = equiv_tra.alumno 
+  AND sga_alumnos.persona = mdp_personas.persona
+  AND sga_elementos.elemento = equiv_otorg.elemento
+
+  -- Otra propuesta del alumno  
+  AND sga_alumnos2.persona = sga_alumnos.persona
+  AND sga_alumnos2.propuesta <> sga_alumnos.propuesta
+  AND sga_planes_versiones2.plan_version = sga_alumnos2.plan_version
+  AND ingreso.alumno = sga_alumnos2.alumno
+  AND sga_elementos_revision2.elemento = sga_elementos.elemento
+  AND sga_elementos_plan2.plan_version      = sga_alumnos2.plan_version
+  AND sga_elementos_plan2.elemento_revision = sga_elementos_revision2.elemento_revision
+
+  AND (${periodo} = 0 or greatest(equiv_otorg.fecha,'19000101'::date) BETWEEN to_date(${periodo}||'-04-01', 'YYYY-MM-DD') AND to_date((${periodo}+1)||'-03-31','YYYY-MM-DD'))
+
+UNION ALL   
+
+-- Aprobaciones por Resulucion.
+SELECT 	
+    CASE WHEN greatest(reconocimiento.fecha,'19000101'::date) >= to_date(cast(extract(year from greatest(reconocimiento.fecha,'19000101'::date)) as text) || '0401','YYYYMMDD') 
+         THEN extract(year from greatest(reconocimiento.fecha,'19000101'::date))::integer
+    	 ELSE extract(year from greatest(reconocimiento.fecha,'19000101'::date))::integer - 1
+    END as anio_academico,
+    sga_alumnos.ubicacion,
+	to_char(greatest(reconocimiento.fecha,'19000101'::date), 'DD/MM/YYYY')::VARCHAR(8) AS fecha_resolucion,
+	sga_alumnos.alumno ,
+	CASE
+	   WHEN mdp_personas.sexo = 'M' THEN 1
+	   WHEN mdp_personas.sexo = 'F' THEN 2
+	END AS sexo,
+       (CASE WHEN mdp_personas.fecha_nacimiento IS NULL THEN NULL ELSE (
+		extract(year from age(date (extract(year from greatest(reconocimiento.fecha,'19000101'::date)) ||'-12-31'), mdp_personas.fecha_nacimiento))
+	) END) as edad,
+	mdp_personas.nacionalidad,
+	(SELECT CASE WHEN mdp_datos_estudios.nivel_estudio = 3 THEN mdp_datos_estudios.colegio 
+		ELSE NULL END
+	FROM mdp_datos_estudios 
+	WHERE mdp_datos_estudios.persona = mdp_personas.persona
+	LIMIT 1) as colegio,
+	sga_alumnos.propuesta , 
+	reconocimiento.plan_version as plan_version,
+	sga_elementos.elemento as actividad, 
+	'T' as alcance, -- reconocimiento total 
+	'AR' as resultado,  -- Aprobación por Resolución..
+	sga_reconocimiento_act.nota::VARCHAR(10) as nota,
+	sga_escalas_notas_det.concepto as concepto,
+	91 as origen, -- Aprobación por Resolución..
+	sga_reconocimiento_act.reconocimiento_act,
+	0 as actividad_comun,
+    reconocimiento.nro_tramite as tramite,
+	reconocimiento.estado::VARCHAR(1) as estado_tramite,
+	91 as condicion_alumno,
+	1 as registros_examenes, 
+	ingreso.anio_academico_institucion as anio_ingreso_institucion,
+	ingreso.anio_academico_propuesta as anio_ingreso_propuesta,
+	ingreso.periodo_inscripcion_nombre::VARCHAR(100) as periodo_inscripcion_nombre,
+    sga_alumnos.persona
+   FROM
+	reconocimiento,
+	sga_reconocimiento_act  LEFT JOIN sga_escalas_notas_det ON (sga_escalas_notas_det.escala_nota = sga_reconocimiento_act.escala_nota AND  sga_escalas_notas_det.nota = sga_reconocimiento_act.nota),
+	sga_planes_versiones,
+	sga_alumnos,
+	mdp_personas,
+	_wichi_ingreso_alumnos as ingreso,
+	sga_elementos
+	
+WHERE sga_reconocimiento_act.nro_tramite = reconocimiento.nro_tramite
+  AND sga_planes_versiones.plan_version = reconocimiento.plan_version
+  AND sga_alumnos.alumno = reconocimiento.alumno 
+  AND ingreso.alumno = sga_alumnos.alumno
+  AND sga_alumnos.persona = mdp_personas.persona
+  AND sga_elementos.elemento = sga_reconocimiento_act.elemento 
+  AND sga_elementos.entidad_subtipo >= 50  -- Solo actividades. No se recuperan modulos reconocidos...
+
+  AND (${periodo} = 0 or greatest(reconocimiento.fecha,'19000101'::date) BETWEEN to_date(${periodo}||'-04-01', 'YYYY-MM-DD') AND to_date((${periodo}+1)||'-03-31','YYYY-MM-DD'))
+	
+UNION ALL
+
+ -- Reconocimiento de actividades en otras propuestas del alumno (actividad comun entre propuestas)
+ SELECT 	
+	CASE WHEN greatest(reconocimiento.fecha,'19000101'::date) >= to_date(cast(extract(year from greatest(reconocimiento.fecha,'19000101'::date)) as text) || '0401','YYYYMMDD') 
+         THEN extract(year from greatest(reconocimiento.fecha,'19000101'::date))::integer
+    	 ELSE extract(year from greatest(reconocimiento.fecha,'19000101'::date))::integer - 1
+    END as anio_academico,
+    sga_alumnos.ubicacion,
+	to_char(greatest(reconocimiento.fecha,'19000101'::date), 'DD/MM/YYYY')::VARCHAR(8) AS fecha_resolucion,
+	sga_alumnos2.alumno ,
+	CASE
+	   WHEN mdp_personas.sexo = 'M' THEN 1
+	   WHEN mdp_personas.sexo = 'F' THEN 2
+	END AS sexo,
+       (CASE WHEN mdp_personas.fecha_nacimiento IS NULL THEN NULL ELSE (
+		extract(year from age(date (extract(year from greatest(reconocimiento.fecha,'19000101'::date)) ||'-12-31'), mdp_personas.fecha_nacimiento))
+	) END) as edad,
+	mdp_personas.nacionalidad,
+	(SELECT CASE WHEN mdp_datos_estudios.nivel_estudio = 3 THEN mdp_datos_estudios.colegio 
+		ELSE NULL END
+	FROM mdp_datos_estudios 
+	WHERE mdp_datos_estudios.persona = mdp_personas.persona
+	LIMIT 1) as colegio,
+	sga_alumnos2.propuesta ,  
+	sga_planes_versiones2.plan_version as plan_version,  
+	sga_elementos.elemento as actividad,  
+	'T' as alcance, -- reconocimiento total
+	'AR' as resultado,  -- Aprobación por Resolución..
+	sga_reconocimiento_act.nota::VARCHAR(10) as nota,
+	sga_escalas_notas_det.concepto as concepto,
+	91 as origen, -- Aprobación por Resolución..
+	sga_reconocimiento_act.reconocimiento_act,
+	1 as actividad_comun,
+	reconocimiento.nro_tramite as tramite,
+	reconocimiento.estado::VARCHAR(1) as estado_tramite,
+	91 as condicion_alumno,
+	1 as registros_examenes, 
+	ingreso.anio_academico_institucion as anio_ingreso_institucion,
+	ingreso.anio_academico_propuesta as anio_ingreso_propuesta,
+	ingreso.periodo_inscripcion_nombre::VARCHAR(100) as periodo_inscripcion_nombre,
+    sga_alumnos.persona
+   FROM
+	reconocimiento,
+	sga_reconocimiento_act  LEFT JOIN sga_escalas_notas_det ON (sga_escalas_notas_det.escala_nota = sga_reconocimiento_act.escala_nota AND  sga_escalas_notas_det.nota = sga_reconocimiento_act.nota),
+	sga_planes_versiones,
+	sga_alumnos,
+	mdp_personas,
+	_wichi_ingreso_alumnos as ingreso,
+	sga_elementos,
+	sga_alumnos as sga_alumnos2,
+	sga_planes_versiones as sga_planes_versiones2,
+	sga_elementos_plan as sga_elementos_plan2,
+	sga_elementos_revision as sga_elementos_revision2
+	
+WHERE sga_reconocimiento_act.nro_tramite = reconocimiento.nro_tramite
+  AND sga_planes_versiones.plan_version = reconocimiento.plan_version
+  AND sga_alumnos.alumno = reconocimiento.alumno 
+  AND sga_elementos.elemento = sga_reconocimiento_act.elemento 
+  AND sga_elementos.entidad_subtipo >= 50  -- Solo actividades. No se recuperan modulos reconocidos...
+
+  -- Otra propuesta del alumno  
+  AND sga_alumnos2.persona = sga_alumnos.persona
+  AND sga_alumnos2.propuesta <> sga_alumnos.propuesta
+  AND sga_planes_versiones2.plan_version = sga_alumnos2.plan_version
+  AND ingreso.alumno = sga_alumnos2.alumno
+  AND sga_alumnos.persona = mdp_personas.persona
+  AND sga_elementos_revision2.elemento = sga_elementos.elemento
+  AND sga_elementos_plan2.plan_version      = sga_alumnos2.plan_version
+  AND sga_elementos_plan2.elemento_revision = sga_elementos_revision2.elemento_revision
+
+  AND (${periodo} = 0 or greatest(reconocimiento.fecha,'19000101'::date) BETWEEN to_date(${periodo}||'-04-01', 'YYYY-MM-DD') AND to_date((${periodo}+1)||'-03-31','YYYY-MM-DD'));

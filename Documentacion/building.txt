@@ -1,0 +1,35 @@
+name: "Build"
+description: "Executes a compilation."
+
+runs:
+  using: "composite"
+  steps:
+      - name: Compile
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install libmicrohttpd-dev
+          cd $(pwd)/lib/prom-client-c/prom
+          mkdir build
+          cd build
+          cmake ..
+          make ..
+          sudo make install
+
+          cd ..
+          cd ..
+
+          cd promhttp
+          mkdir build
+          cd build
+          cmake ..
+          make
+          sudo make install
+
+          cd ..
+          cd ..
+          cd ..
+          cd ..
+
+          mkdir build
+          make 
